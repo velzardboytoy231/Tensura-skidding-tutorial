@@ -82,7 +82,6 @@ local gradientPresets = {
 local gui = Instance.new("ScreenGui")
 gui.Parent = LocalPlayer:WaitForChild("PlayerGui")
 gui.ResetOnSpawn = false
-gui.IgnoreGuiInset = true -- avoids the GUI shifting under mobile status bar / notch
 
 local frame = Instance.new("Frame")
 frame.Parent = gui
@@ -171,7 +170,6 @@ topBar.Position = UDim2.new(0, 0, 0, 0)
 topBar.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
 topBar.BorderSizePixel = 0
 topBar.Name = "TopBar"
-topBar.Active = true -- ensures touch input is captured on mobile
 
 local topBarCorner = Instance.new("UICorner", topBar)
 topBarCorner.CornerRadius = UDim.new(0, 18)
@@ -192,76 +190,122 @@ title.TextStrokeTransparency = 0.7
 title.TextXAlignment = Enum.TextXAlignment.Center
 title.TextYAlignment = Enum.TextYAlignment.Center
 
--- Drag logic (mouse + touch, with screen-bounds clamping for mobile)
+-- Drag logic (mouse + touch, so it works on mobile)
 local UIS = game:GetService("UserInputService")
 local dragging = false
 local dragStart
 local startPos
 local dragInput
-local activeDragInput -- the specific InputObject (mouse or finger) we're tracking
-
-local function clampFramePosition(newPos)
-    local viewport = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize or Vector2.new(800, 600)
-    local absSize = frame.AbsoluteSize
-    local minX, minY = 0, 0
-    local maxX = math.max(minX, viewport.X - absSize.X)
-    local maxY = math.max(minY, viewport.Y - absSize.Y)
-    local x = math.clamp(newPos.X.Offset, minX, maxX)
-    local y = math.clamp(newPos.Y.Offset, minY, maxY)
-    return UDim2.new(newPos.X.Scale, x, newPos.Y.Scale, y)
-end
-
-local function updateDrag(input)
-    local delta = input.Position - dragStart
-    local newPos = UDim2.new(
-        startPos.X.Scale, startPos.X.Offset + delta.X,
-        startPos.Y.Scale, startPos.Y.Offset + delta.Y
-    )
-    frame.Position = clampFramePosition(newPos)
-end
 
 topBar.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1
-        or input.UserInputType == Enum.UserInputType.Touch then
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
         dragging = true
-        activeDragInput = input
         dragStart = input.Position
         startPos = frame.Position
         input.Changed:Connect(function()
             if input.UserInputState == Enum.UserInputState.End then
                 dragging = false
-                if activeDragInput == input then
-                    activeDragInput = nil
-                end
             end
         end)
     end
 end)
-
 topBar.InputChanged:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseMovement
-        or input.UserInputType == Enum.UserInputType.Touch then
+    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
         dragInput = input
     end
 end)
-
 UIS.InputChanged:Connect(function(input)
-    if dragging and activeDragInput == input then
-        updateDrag(input)
-    elseif dragging and input == dragInput then
-        -- fallback path for movement events captured outside topBar's own InputChanged
-        updateDrag(input)
-    end
-end)
-
-UIS.InputEnded:Connect(function(input)
-    if input == activeDragInput then
-        dragging = false
-        activeDragInput = nil
+    if input == dragInput and dragging then
+        local delta = input.Position - dragStart
+        frame.Position = UDim2.new(
+            startPos.X.Scale, startPos.X.Offset + delta.X,
+            startPos.Y.Scale, startPos.Y.Offset + delta.Y
+        )
     end
 end)
 
 frame:GetPropertyChangedSignal("Position"):Connect(syncBorderToFrame)
+
+--// MOBILE SHOW/HIDE TOGGLE
+-- Small floating pill button, independent of the main panel, that can be
+-- dragged anywhere on screen and tapped to show/hide the whole GUI.
+-- Handy on phones where the panel can cover gameplay/UI you need to tap.
+local toggleButton = Instance.new("TextButton")
+toggleButton.Name = "ToggleGUIButton"
+toggleButton.Parent = gui
+toggleButton.Size = UDim2.new(0, 46, 0, 46)
+toggleButton.Position = UDim2.new(0, 10, 0, 10)
+toggleButton.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+toggleButton.BackgroundTransparency = 0.1
+toggleButton.Text = "✕"
+toggleButton.Font = Enum.Font.GothamBold
+toggleButton.TextSize = 22
+toggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+toggleButton.BorderSizePixel = 0
+toggleButton.ZIndex = 1000
+toggleButton.AutoButtonColor = false
+toggleButton.Active = true
+
+local toggleCorner = Instance.new("UICorner")
+toggleCorner.CornerRadius = UDim.new(1, 0)
+toggleCorner.Parent = toggleButton
+
+local toggleStroke = Instance.new("UIStroke")
+toggleStroke.Thickness = 2
+toggleStroke.Color = Color3.fromRGB(255, 255, 255)
+toggleStroke.Transparency = 0.6
+toggleStroke.Parent = toggleButton
+
+local guiVisible = true
+local function setGUIVisible(visible)
+    guiVisible = visible
+    frame.Visible = visible
+    borderFrame.Visible = visible
+    toggleButton.Text = visible and "✕" or "≡"
+end
+
+-- Drag the toggle button itself (mouse + touch), tracking movement so a
+-- drag doesn't also register as a tap.
+local toggleDragging = false
+local toggleDragStart, toggleStartPos, toggleDragInput
+local toggleMoved = false
+
+toggleButton.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        toggleDragging = true
+        toggleMoved = false
+        toggleDragStart = input.Position
+        toggleStartPos = toggleButton.Position
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                toggleDragging = false
+            end
+        end)
+    end
+end)
+toggleButton.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+        toggleDragInput = input
+    end
+end)
+UIS.InputChanged:Connect(function(input)
+    if input == toggleDragInput and toggleDragging then
+        local delta = input.Position - toggleDragStart
+        if delta.Magnitude > 4 then
+            toggleMoved = true
+        end
+        toggleButton.Position = UDim2.new(
+            toggleStartPos.X.Scale, toggleStartPos.X.Offset + delta.X,
+            toggleStartPos.Y.Scale, toggleStartPos.Y.Offset + delta.Y
+        )
+    end
+end)
+
+toggleButton.MouseButton1Click:Connect(function()
+    if not toggleMoved then
+        setGUIVisible(not guiVisible)
+    end
+end)
 
 local tabPanel = Instance.new("Frame")
 tabPanel.Name = "TabPanel"
@@ -753,43 +797,16 @@ task.spawn(function()
     end
 end)
 
---// Coordination between Auto Prestige and Auto Raid
--- Previously, Auto Prestige fired prestigeRemote:InvokeServer() once per
--- FRAME (task.wait() with no args), and Auto Raid fired on its own
--- independent 2s timer with zero awareness of it. A raid could get queued
--- at the exact moment a prestige attempt landed server-side, stepping on
--- the reset and making prestige farming inconsistent. Fix: throttle the
--- prestige attempt rate to something sane, and give raids a short
--- cooldown window right after every prestige attempt so the server has
--- time to fully process it before the next raid is allowed to start.
-local PRESTIGE_RETRY_DELAY = 0.5   -- seconds between prestige attempts (was every frame)
-local PRESTIGE_RAID_COOLDOWN = 1.5 -- seconds raids are held off after a prestige attempt
-local raidsPausedUntil = 0
-
 task.spawn(function()
     while true do
         if prestigeEnabled() then
-            local ok, result = pcall(function()
-                return prestigeRemote:InvokeServer()
+            pcall(function()
+                prestigeRemote:InvokeServer()
             end)
-            if ok then
-                if result then
-                    print("✅ Prestige attempt returned:", result)
-                end
-                -- Pause raids regardless of the return value, since we don't
-                -- know this game's exact success signal for the remote.
-                -- This still guarantees raids never overlap a prestige call.
-                raidsPausedUntil = os.clock() + PRESTIGE_RAID_COOLDOWN
-            else
-                warn("Prestige call failed:", result)
-            end
-            task.wait(PRESTIGE_RETRY_DELAY)
-        else
-            task.wait(0.2)
         end
+        task.wait()
     end
 end)
-
 task.spawn(function()
     while true do
         if evolveEnabled() then
@@ -803,23 +820,19 @@ task.spawn(function()
                 end
             end
         end
-        task.wait(0.5) -- was firing every single frame; no reason to poll that fast
+        task.wait()
     end
 end)
-
 task.spawn(function()
     while true do
         if raidEnabled() then
-            if os.clock() >= raidsPausedUntil then
-                pcall(function()
-                    raidRemote:InvokeServer(raidSelection())
-                end)
-            end
+            pcall(function()
+                raidRemote:InvokeServer(raidSelection())
+            end)
         end
         task.wait(2)
     end
 end)
-
 task.spawn(function()
     while true do
         if dungeonEnabled() then
