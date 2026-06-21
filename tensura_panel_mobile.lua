@@ -681,6 +681,9 @@ local antiAFKEnabled, antiAFKToggle = createToggle("Anti-AFK", 52, settingsTab)
 -- NEW: Anti-Spam toggle (kills "EVOLUTION FAILED" notification spam that causes lag)
 local antiSpamEnabled, antiSpamToggle = createToggle("Anti-Spam (Lag Fix)", 94, settingsTab)
 
+-- NEW: Auto-Claim toggle (auto-clicks "CLAIM" reward popups, e.g. after raids)
+local autoClaimEnabled, autoClaimToggle = createToggle("Auto Claim Rewards", 136, settingsTab)
+
 task.spawn(function()
     local lastPreset = selectedGradientPreset
     while true do
@@ -762,6 +765,58 @@ task.spawn(function()
             wasEnabled = true
         elseif not enabled and wasEnabled then
             stopAntiSpam()
+            wasEnabled = false
+        end
+        task.wait(0.2)
+    end
+end)
+
+-- NEW: Auto-Claim watcher, toggle-controlled, connects/disconnects cleanly.
+-- Watches for any TextButton whose text is exactly "CLAIM" (the reward popup
+-- button) and clicks it automatically the instant it appears.
+local autoClaimConnection
+
+local function startAutoClaim()
+    if autoClaimConnection then return end
+    autoClaimConnection = PlayerGui.DescendantAdded:Connect(function(inst)
+        if inst:IsA("TextButton") then
+            task.spawn(function()
+                task.wait() -- let it populate .Text
+                local ok, text = pcall(function() return inst.Text end)
+                if ok and text and text:match("^%s*CLAIM%s*$") then
+                    -- small delay so the popup's open animation/tween finishes
+                    task.wait(0.15)
+                    local fired = pcall(function()
+                        firesignal(inst.MouseButton1Click)
+                    end)
+                    if not fired then
+                        -- fallback for executors without firesignal support
+                        pcall(function()
+                            inst:Activate()
+                        end)
+                    end
+                end
+            end)
+        end
+    end)
+end
+
+local function stopAutoClaim()
+    if autoClaimConnection then
+        autoClaimConnection:Disconnect()
+        autoClaimConnection = nil
+    end
+end
+
+task.spawn(function()
+    local wasEnabled = false
+    while true do
+        local enabled = autoClaimEnabled()
+        if enabled and not wasEnabled then
+            startAutoClaim()
+            wasEnabled = true
+        elseif not enabled and wasEnabled then
+            stopAutoClaim()
             wasEnabled = false
         end
         task.wait(0.2)
