@@ -2,6 +2,8 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local LocalPlayer = Players.LocalPlayer
+local HttpService = game:GetService("HttpService")
+local TeleportService = game:GetService("TeleportService")
 
 --// Anti-AFK service
 local VirtualUser = game:GetService("VirtualUser")
@@ -390,33 +392,37 @@ local function setGUIGradientPreset(newPreset)
     borderGradient.Color = ColorSequence.new(keypoints)
 end
 
-local function createToggle(name, yPos, parent)
+local function createToggle(name, yPos, parent, default)
     local toggle = Instance.new("TextButton")
     toggle.Parent = parent
     toggle.Size = UDim2.new(0, 260, 0, 32)
     toggle.Position = UDim2.new(0, 10, 0, yPos)
-    toggle.BackgroundColor3 = Color3.fromRGB(150, 50, 50)
     toggle.TextColor3 = Color3.fromRGB(255, 255, 255)
     toggle.Font = Enum.Font.SourceSans
     toggle.TextSize = 16
-    toggle.Text = name .. ": OFF"
     toggle.BorderSizePixel = 0
-    local enabled = false
+    local enabled = default and true or false
+    toggle.Text = name .. (enabled and ": ON" or ": OFF")
+    toggle.BackgroundColor3 = enabled and Color3.fromRGB(50, 150, 50) or Color3.fromRGB(150, 50, 50)
 
     local corner = Instance.new("UICorner", toggle)
     corner.CornerRadius = UDim.new(0, 18)
 
-    toggle.MouseButton1Click:Connect(function()
-        enabled = not enabled
+    local function setEnabled(state)
+        enabled = state and true or false
         toggle.Text = name .. (enabled and ": ON" or ": OFF")
         toggle.BackgroundColor3 = enabled and Color3.fromRGB(50, 150, 50) or Color3.fromRGB(150, 50, 50)
+    end
+
+    toggle.MouseButton1Click:Connect(function()
+        setEnabled(not enabled)
     end)
-    return function() return enabled end, toggle
+    return function() return enabled end, toggle, setEnabled
 end
 
 local openDropdowns = {}
 
-local function createDropdown(name, options, yPos, parent)
+local function createDropdown(name, options, yPos, parent, default)
     local dropdown = Instance.new("TextButton")
     dropdown.Parent = parent
     dropdown.Size = UDim2.new(0, 260, 0, 32)
@@ -425,14 +431,14 @@ local function createDropdown(name, options, yPos, parent)
     dropdown.TextColor3 = Color3.fromRGB(255, 255, 255)
     dropdown.Font = Enum.Font.SourceSans
     dropdown.TextSize = 16
-    dropdown.Text = name .. ": " .. options[1]
     dropdown.ZIndex = 2
     dropdown.BorderSizePixel = 0
 
     local corner = Instance.new("UICorner", dropdown)
     corner.CornerRadius = UDim.new(0, 18)
 
-    local selected = options[1]
+    local selected = default or options[1]
+    dropdown.Text = name .. ": " .. tostring(selected)
     local open = false
 
     local container = Instance.new("Frame")
@@ -487,6 +493,17 @@ local function createDropdown(name, options, yPos, parent)
         end)
     end
 
+    local function setSelected(value)
+        for _, option in ipairs(options) do
+            if tostring(option) == tostring(value) then
+                selected = option
+                dropdown.Text = name .. ": " .. tostring(selected)
+                return true
+            end
+        end
+        return false
+    end
+
     dropdown.MouseButton1Click:Connect(function()
         open = not open
 
@@ -507,41 +524,30 @@ local function createDropdown(name, options, yPos, parent)
         end
     end)
 
-    return function() return selected end
+    return function() return selected end, setSelected
 end
 
 --=== TAB CONTENTS ===--
 local combatTab = tabContainers["Combat"]
-local combatEnabled = createToggle("Auto Combat", 10, combatTab)
-local skipEnabled = createToggle("Auto Skip Turn", 52, combatTab)
+local combatEnabled, _, setCombatEnabled = createToggle("Auto Combat", 10, combatTab)
+local skipEnabled, _, setSkipEnabled = createToggle("Auto Skip Turn", 52, combatTab)
 
 local combatTypeOptions = {"Cycle", "Single", "Prefer Skill"}
-local function getYForNextCombatControl()
-    local ys = {10, 52}
-    for _, child in ipairs(combatTab:GetChildren()) do
-        if child:IsA("GuiObject") then
-            table.insert(ys, child.Position and child.Position.Y.Offset or 0)
-        end
-    end
-    local maxY = 0
-    for _, y in ipairs(ys) do if y > maxY then maxY = y end end
-    return maxY + 42
-end
-local combatTypeDropdown = createDropdown("Combat Type", combatTypeOptions, 94, combatTab)
+local combatTypeDropdown, setCombatType = createDropdown("Combat Type", combatTypeOptions, 94, combatTab)
 
-local skillSelect = createDropdown("Select Skill", {
+local skillSelect, setSkillSelect = createDropdown("Select Skill", {
     "1","2","3","4","5","6","7","8"
 }, 136, combatTab)
 
 local playerTab = tabContainers["Player"]
-local prestigeEnabled = createToggle("Auto Prestige", 10, playerTab)
-local evolveEnabled = createToggle("Auto Evolve", 52, playerTab)
-local autoRaceEnabled, autoRaceToggle = createToggle("Auto Race", 94, playerTab)
+local prestigeEnabled, _, setPrestigeEnabled = createToggle("Auto Prestige", 10, playerTab)
+local evolveEnabled, _, setEvolveEnabled = createToggle("Auto Evolve", 52, playerTab)
+local autoRaceEnabled, autoRaceToggle, setAutoRaceEnabled = createToggle("Auto Race", 94, playerTab)
 
 local races = {
     "Human", "Dragon Hatchling", "Lesser Daemon", "Ogre", "Orc", "Goblin", "Slime", "Beastfolk", "Elf", "Wight"
 }
-local raceDropdown = createDropdown("Auto Race Target", races, 136, playerTab)
+local raceDropdown, setRaceDropdown = createDropdown("Auto Race Target", races, 136, playerTab)
 
 local ROLL_DELAY = 0.001
 
@@ -586,9 +592,9 @@ end)
 local spiritsTab = tabContainers["Spirits"]
 local spiritNames = {"Lesser Dark", "Lesser Water", "Greater Water", "Greater Dark", "Greater Earth", "Greater Fire", "Greater Holy", "NONE"}
 local spiritSlots = {"1", "2", "3", "4"}
-local autoSpiritRollEnabled, autoSpiritRollToggle = createToggle("Auto Roll Spirit", 10, spiritsTab)
-local spiritTargetDropdown = createDropdown("Target Spirit", spiritNames, 52, spiritsTab)
-local spiritSlotDropdown = createDropdown("Spirit Slot", spiritSlots, 94, spiritsTab)
+local autoSpiritRollEnabled, autoSpiritRollToggle, setAutoSpiritRollEnabled = createToggle("Auto Roll Spirit", 10, spiritsTab)
+local spiritTargetDropdown, setSpiritTarget = createDropdown("Target Spirit", spiritNames, 52, spiritsTab)
+local spiritSlotDropdown, setSpiritSlot = createDropdown("Spirit Slot", spiritSlots, 94, spiritsTab)
 
 local lastSpiritTarget = nil
 local lastSpiritSlot = nil
@@ -599,7 +605,7 @@ local function getOwnedSpirits()
     if not data then return {} end
     local spirits = data:FindFirstChild("spirits2")
     if spirits and spirits.Value ~= "" then
-        local success, decoded = pcall(function() return game:GetService("HttpService"):JSONDecode(spirits.Value) end)
+        local success, decoded = pcall(function() return HttpService:JSONDecode(spirits.Value) end)
         if success and type(decoded) == "table" then
             return decoded
         end
@@ -661,28 +667,327 @@ local raidTab = tabContainers["Raids"]
 local dungeonTab = tabContainers["Dungeon"]
 local settingsTab = tabContainers["Settings"]
 
-local raidEnabled = createToggle("Auto Raid", 10, raidTab)
-local raidSelection = createDropdown("Select Raid", {
+local raidEnabled, _, setRaidEnabled = createToggle("Auto Raid", 10, raidTab)
+local raidSelection, setRaidSelection = createDropdown("Select Raid", {
     "Direwolf Pack Attack",
     "Kingdom of Falmuth Battle",
     "Charybdis Descent",
     "Hinata Sakaguchi Encounter",
     "Scorch Dragon Velgrynd"
 }, 52, raidTab)
-local dungeonEnabled = createToggle("Auto Dungeon", 10, dungeonTab)
+local dungeonEnabled, _, setDungeonEnabled = createToggle("Auto Dungeon", 10, dungeonTab)
 
 local colorPresetsList = {}
 for name, _ in pairs(gradientPresets) do
     table.insert(colorPresetsList, name)
 end
-local colorDropdown = createDropdown("Color", colorPresetsList, 10, settingsTab)
-local antiAFKEnabled, antiAFKToggle = createToggle("Anti-AFK", 52, settingsTab)
+local colorDropdown, setColorDropdown = createDropdown("Color", colorPresetsList, 10, settingsTab)
+local antiAFKEnabled, antiAFKToggle, setAntiAFKEnabled = createToggle("Anti-AFK", 52, settingsTab)
+local antiSpamEnabled, antiSpamToggle, setAntiSpamEnabled = createToggle("Anti-Spam (Lag Fix)", 94, settingsTab)
+local autoClaimEnabled, autoClaimToggle, setAutoClaimEnabled = createToggle("Auto Claim Rewards", 136, settingsTab)
 
--- NEW: Anti-Spam toggle (kills "EVOLUTION FAILED" notification spam that causes lag)
-local antiSpamEnabled, antiSpamToggle = createToggle("Anti-Spam (Lag Fix)", 94, settingsTab)
+--=====================================================--
+--===              AUTO REJOIN SYSTEM               ===--
+--=====================================================--
+-- Placed above Settings buttons so they sit at y=178 area cleanly.
 
--- NEW: Auto-Claim toggle (auto-clicks "CLAIM" reward popups, e.g. after raids)
-local autoClaimEnabled, autoClaimToggle = createToggle("Auto Claim Rewards", 136, settingsTab)
+local autoRejoinEnabled, autoRejoinToggle, setAutoRejoinEnabled = createToggle("Auto Rejoin", 178, settingsTab)
+
+-- Status label for rejoin (sits just below the toggle)
+local rejoinStatusLabel = Instance.new("TextLabel")
+rejoinStatusLabel.Parent = settingsTab
+rejoinStatusLabel.Size = UDim2.new(0, 260, 0, 18)
+rejoinStatusLabel.Position = UDim2.new(0, 10, 0, 214)
+rejoinStatusLabel.BackgroundTransparency = 1
+rejoinStatusLabel.Font = Enum.Font.SourceSans
+rejoinStatusLabel.TextSize = 13
+rejoinStatusLabel.TextColor3 = Color3.fromRGB(160, 210, 160)
+rejoinStatusLabel.TextXAlignment = Enum.TextXAlignment.Left
+rejoinStatusLabel.Text = "Rejoin: idle"
+
+-- Capture the private server link code at script start (if one exists).
+-- Roblox stores it in game.PrivateServerId / game.PrivateServerOwnerId.
+-- TeleportService:TeleportToPrivateServer needs the PlaceId + reservedServerCode.
+-- We read the reserved code via GetJoinData which is available in LocalScript context.
+local reservedServerCode = nil
+task.spawn(function()
+    -- GetJoinData is not always instantly available; wrap in pcall
+    local ok, joinData = pcall(function()
+        return Players:GetJoinData()
+    end)
+    if ok and joinData then
+        reservedServerCode = joinData.ReservedServerAccessCode ~= "" and joinData.ReservedServerAccessCode or nil
+    end
+    if reservedServerCode then
+        print("[AutoRejoin] Private server code captured:", reservedServerCode)
+        rejoinStatusLabel.Text = "Rejoin: private server detected"
+    else
+        rejoinStatusLabel.Text = "Rejoin: public server detected"
+    end
+end)
+
+local REJOIN_DELAY = 5 -- seconds to wait before rejoining
+
+local function doRejoin()
+    if not autoRejoinEnabled() then return end
+    rejoinStatusLabel.Text = "Rejoining in " .. REJOIN_DELAY .. "s..."
+    task.wait(REJOIN_DELAY)
+    if not autoRejoinEnabled() then
+        rejoinStatusLabel.Text = "Rejoin: cancelled (toggled off)"
+        return
+    end
+
+    local placeId = game.PlaceId
+
+    if reservedServerCode and reservedServerCode ~= "" then
+        -- Rejoin the exact private server
+        rejoinStatusLabel.Text = "Rejoining private server..."
+        local ok, err = pcall(function()
+            TeleportService:TeleportToPrivateServer(placeId, reservedServerCode, {LocalPlayer})
+        end)
+        if not ok then
+            warn("[AutoRejoin] Private server rejoin failed:", err)
+            -- Fall back to public if private server rejoin fails
+            rejoinStatusLabel.Text = "Private rejoin failed, trying public..."
+            pcall(function()
+                TeleportService:Teleport(placeId, LocalPlayer)
+            end)
+        end
+    else
+        -- Rejoin the public server
+        rejoinStatusLabel.Text = "Rejoining public server..."
+        local ok, err = pcall(function()
+            TeleportService:Teleport(placeId, LocalPlayer)
+        end)
+        if not ok then
+            warn("[AutoRejoin] Public server rejoin failed:", err)
+            -- Last-resort: use teleport to same place without specifying player
+            pcall(function()
+                TeleportService:Teleport(placeId)
+            end)
+        end
+    end
+end
+
+-- Hook: fires when the server is shutting down or we are being kicked
+game:BindToClose(function()
+    doRejoin()
+end)
+
+-- Hook: fires when the local player is kicked / removed from the server
+Players.PlayerRemoving:Connect(function(p)
+    if p == LocalPlayer then
+        doRejoin()
+    end
+end)
+
+-- Hook: catch teleport state failures (e.g. failed teleport attempt mid-game)
+LocalPlayer.OnTeleport:Connect(function(teleportState, _placeId, _spawnName)
+    if teleportState == Enum.TeleportState.Failed then
+        warn("[AutoRejoin] Teleport failed, retrying...")
+        rejoinStatusLabel.Text = "Teleport failed, retrying..."
+        task.wait(3)
+        doRejoin()
+    end
+end)
+
+--=====================================================--
+--===          END AUTO REJOIN SYSTEM               ===--
+--=====================================================--
+
+--=====================================================--
+--===            CONFIG AUTO-SAVE SYSTEM            ===--
+--=====================================================--
+local CONFIG_REGISTRY = {
+    CombatEnabled     = { get = combatEnabled,         set = setCombatEnabled },
+    SkipEnabled       = { get = skipEnabled,           set = setSkipEnabled },
+    CombatType        = { get = combatTypeDropdown,    set = setCombatType },
+    SelectedSkill     = { get = skillSelect,           set = setSkillSelect },
+    PrestigeEnabled   = { get = prestigeEnabled,       set = setPrestigeEnabled },
+    EvolveEnabled     = { get = evolveEnabled,         set = setEvolveEnabled },
+    AutoRaceEnabled   = { get = autoRaceEnabled,       set = setAutoRaceEnabled },
+    RaceTarget        = { get = raceDropdown,          set = setRaceDropdown },
+    AutoSpiritEnabled = { get = autoSpiritRollEnabled, set = setAutoSpiritRollEnabled },
+    SpiritTarget      = { get = spiritTargetDropdown,  set = setSpiritTarget },
+    SpiritSlot        = { get = spiritSlotDropdown,    set = setSpiritSlot },
+    RaidEnabled       = { get = raidEnabled,           set = setRaidEnabled },
+    RaidSelection     = { get = raidSelection,         set = setRaidSelection },
+    DungeonEnabled    = { get = dungeonEnabled,        set = setDungeonEnabled },
+    ColorPreset       = { get = colorDropdown,         set = setColorDropdown },
+    AntiAFKEnabled    = { get = antiAFKEnabled,        set = setAntiAFKEnabled },
+    AntiSpamEnabled   = { get = antiSpamEnabled,       set = setAntiSpamEnabled },
+    AutoClaimEnabled  = { get = autoClaimEnabled,      set = setAutoClaimEnabled },
+    AutoRejoinEnabled = { get = autoRejoinEnabled,     set = setAutoRejoinEnabled }, -- NEW
+}
+
+local CONFIG_FOLDER = "TensuraAutoConfig"
+local CONFIG_FILE = CONFIG_FOLDER .. "/config.json"
+
+local fsSupported = typeof(writefile) == "function"
+    and typeof(readfile) == "function"
+    and typeof(isfile) == "function"
+    and typeof(makefolder) == "function"
+    and typeof(isfolder) == "function"
+
+if fsSupported then
+    pcall(function()
+        if not isfolder(CONFIG_FOLDER) then
+            makefolder(CONFIG_FOLDER)
+        end
+    end)
+end
+
+local function buildConfigTable()
+    local data = {}
+    for key, entry in pairs(CONFIG_REGISTRY) do
+        local ok, value = pcall(entry.get)
+        if ok then
+            data[key] = value
+        end
+    end
+    data.FramePosition = {
+        XScale = frame.Position.X.Scale,
+        XOffset = frame.Position.X.Offset,
+        YScale = frame.Position.Y.Scale,
+        YOffset = frame.Position.Y.Offset,
+    }
+    return data
+end
+
+local function saveConfig()
+    if not fsSupported then return false end
+    local ok, encoded = pcall(function()
+        return HttpService:JSONEncode(buildConfigTable())
+    end)
+    if not ok then return false end
+    return pcall(function()
+        writefile(CONFIG_FILE, encoded)
+    end)
+end
+
+local function loadConfig()
+    if not fsSupported then return false end
+    local exists, fileExists = pcall(function() return isfile(CONFIG_FILE) end)
+    if not exists or not fileExists then return false end
+
+    local readOk, raw = pcall(function() return readfile(CONFIG_FILE) end)
+    if not readOk then return false end
+
+    local decodeOk, data = pcall(function() return HttpService:JSONDecode(raw) end)
+    if not decodeOk or type(data) ~= "table" then return false end
+
+    for key, entry in pairs(CONFIG_REGISTRY) do
+        if data[key] ~= nil and entry.set then
+            pcall(function() entry.set(data[key]) end)
+        end
+    end
+
+    if data.ColorPreset and gradientPresets[data.ColorPreset] then
+        pcall(function() setGUIGradientPreset(data.ColorPreset) end)
+    end
+
+    if data.FramePosition then
+        pcall(function()
+            frame.Position = UDim2.new(
+                data.FramePosition.XScale or 0, data.FramePosition.XOffset or 20,
+                data.FramePosition.YScale or 0, data.FramePosition.YOffset or 100
+            )
+            syncBorderToFrame()
+        end)
+    end
+
+    return true
+end
+
+local configLoaded = loadConfig()
+
+-- Settings tab: manual save / delete buttons + status label
+-- Shifted down by 42px to make room for the Auto Rejoin toggle above
+local saveConfigButton = Instance.new("TextButton")
+saveConfigButton.Parent = settingsTab
+saveConfigButton.Size = UDim2.new(0, 125, 0, 32)
+saveConfigButton.Position = UDim2.new(0, 10, 0, 236)
+saveConfigButton.BackgroundColor3 = Color3.fromRGB(60, 100, 160)
+saveConfigButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+saveConfigButton.Font = Enum.Font.SourceSans
+saveConfigButton.TextSize = 16
+saveConfigButton.Text = "Save Config"
+saveConfigButton.BorderSizePixel = 0
+Instance.new("UICorner", saveConfigButton).CornerRadius = UDim.new(0, 18)
+
+local resetConfigButton = Instance.new("TextButton")
+resetConfigButton.Parent = settingsTab
+resetConfigButton.Size = UDim2.new(0, 125, 0, 32)
+resetConfigButton.Position = UDim2.new(0, 145, 0, 236)
+resetConfigButton.BackgroundColor3 = Color3.fromRGB(150, 60, 60)
+resetConfigButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+resetConfigButton.Font = Enum.Font.SourceSans
+resetConfigButton.TextSize = 16
+resetConfigButton.Text = "Delete Saved"
+resetConfigButton.BorderSizePixel = 0
+Instance.new("UICorner", resetConfigButton).CornerRadius = UDim.new(0, 18)
+
+local configStatusLabel = Instance.new("TextLabel")
+configStatusLabel.Parent = settingsTab
+configStatusLabel.Size = UDim2.new(0, 260, 0, 20)
+configStatusLabel.Position = UDim2.new(0, 10, 0, 272)
+configStatusLabel.BackgroundTransparency = 1
+configStatusLabel.Font = Enum.Font.SourceSans
+configStatusLabel.TextSize = 14
+configStatusLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+configStatusLabel.TextXAlignment = Enum.TextXAlignment.Left
+configStatusLabel.Text = (not fsSupported) and "Autosave unsupported by executor"
+    or (configLoaded and "Config loaded - Autosave: ON" or "No saved config - Autosave: ON")
+
+saveConfigButton.MouseButton1Click:Connect(function()
+    local ok = saveConfig()
+    configStatusLabel.Text = ok and "Saved!" or "Save failed"
+    task.delay(1.5, function()
+        configStatusLabel.Text = fsSupported and "Autosave: ON" or "Autosave unsupported by executor"
+    end)
+end)
+
+resetConfigButton.MouseButton1Click:Connect(function()
+    if fsSupported then
+        pcall(function()
+            if isfile(CONFIG_FILE) then
+                if typeof(delfile) == "function" then
+                    delfile(CONFIG_FILE)
+                else
+                    writefile(CONFIG_FILE, "{}")
+                end
+            end
+        end)
+    end
+    configStatusLabel.Text = "Saved config deleted"
+    task.delay(1.5, function()
+        configStatusLabel.Text = fsSupported and "Autosave: ON" or "Autosave unsupported by executor"
+    end)
+end)
+
+if not fsSupported then
+    warn("[Tensura Panel] Executor doesn't support file I/O (writefile/readfile) - config auto-save disabled.")
+end
+
+task.spawn(function()
+    if not fsSupported then return end
+    local lastSnapshot = nil
+    while true do
+        local ok, snapshot = pcall(function()
+            return HttpService:JSONEncode(buildConfigTable())
+        end)
+        if ok and snapshot ~= lastSnapshot then
+            local saved = pcall(function() writefile(CONFIG_FILE, snapshot) end)
+            if saved then
+                lastSnapshot = snapshot
+            end
+        end
+        task.wait(1)
+    end
+end)
+--=====================================================--
+--===          END CONFIG AUTO-SAVE SYSTEM          ===--
+--=====================================================--
 
 task.spawn(function()
     local lastPreset = selectedGradientPreset
@@ -723,7 +1028,6 @@ task.spawn(function()
     end
 end)
 
--- NEW: Anti-Spam watcher, toggle-controlled, connects/disconnects cleanly
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 local antiSpamConnection
 
@@ -732,10 +1036,9 @@ local function startAntiSpam()
     antiSpamConnection = PlayerGui.DescendantAdded:Connect(function(inst)
         if inst:IsA("TextLabel") or inst:IsA("TextButton") then
             task.spawn(function()
-                task.wait() -- give it a frame to populate .Text
+                task.wait()
                 local ok, text = pcall(function() return inst.Text end)
                 if ok and text and text:find("EVOLUTION FAILED") then
-                    -- climb up a couple levels to grab the whole notification card, not just the label
                     local card = inst
                     for i = 1, 3 do
                         if card.Parent and card.Parent ~= PlayerGui then
@@ -771,9 +1074,6 @@ task.spawn(function()
     end
 end)
 
--- NEW: Auto-Claim watcher, toggle-controlled, connects/disconnects cleanly.
--- Watches for any TextButton whose text is exactly "CLAIM" (the reward popup
--- button) and clicks it automatically the instant it appears.
 local autoClaimConnection
 
 local function startAutoClaim()
@@ -781,16 +1081,14 @@ local function startAutoClaim()
     autoClaimConnection = PlayerGui.DescendantAdded:Connect(function(inst)
         if inst:IsA("TextButton") then
             task.spawn(function()
-                task.wait() -- let it populate .Text
+                task.wait()
                 local ok, text = pcall(function() return inst.Text end)
                 if ok and text and text:match("^%s*CLAIM%s*$") then
-                    -- small delay so the popup's open animation/tween finishes
                     task.wait(0.15)
                     local fired = pcall(function()
                         firesignal(inst.MouseButton1Click)
                     end)
                     if not fired then
-                        -- fallback for executors without firesignal support
                         pcall(function()
                             inst:Activate()
                         end)
@@ -823,8 +1121,7 @@ task.spawn(function()
     end
 end)
 
--- Everything else below is the same as before
-
+-- Combat logic
 local combatType = "Cycle"
 local selectedSkill = 1
 local skillOrder = {8,7,6,5,4,3,2,1}
@@ -958,7 +1255,6 @@ task.spawn(function()
     borderStroke.Transparency = 0.5
 end)
 
--- Animation loop for gradients!
 task.spawn(function()
     local t = 0
     while true do
