@@ -111,7 +111,12 @@ local gradientPresets = {
     ["Mono"] = {
         {0, Color3.fromRGB(70, 70, 70)},
         {1, Color3.fromRGB(40, 40, 40)}
-    }
+    },
+    -- New preset for the OP tab glow
+    ["OP Crimson"] = {
+        {0, Color3.fromRGB(255, 60, 60)},
+        {1, Color3.fromRGB(120, 0, 180)}
+    },
 }
 
 --// GUI SETUP (Horizontal & Tabbed + Fade In)
@@ -352,8 +357,8 @@ tabCorner.CornerRadius = UDim.new(0, 18)
 local tabGradient, tabPreset = createAnimatedGradientFromPreset(selectedGradientPreset, 45)
 tabGradient.Parent = tabPanel
 
--- Move Spirits above Settings tab
-local tabs = { "Combat", "Player", "Raids", "Dungeon", "Spirits", "Settings" }
+-- OP tab added between Spirits and Settings
+local tabs = { "Combat", "Player", "Raids", "Dungeon", "Spirits", "⚡ OP", "Settings" }
 local tabButtons = {}
 local tabContainers = {}
 local selectedTab = "Combat"
@@ -385,21 +390,41 @@ for i, tabName in ipairs(tabs) do
     button.Parent = tabPanel
     button.Size = UDim2.new(1, -10, 0, 36)
     button.Position = UDim2.new(0, 5, 0, (i-1)*42 + 5)
-    button.BackgroundColor3 = tabName=="Combat" and Color3.fromRGB(60,100,160) or Color3.fromRGB(60,60,60)
     button.Text = tabName
     button.Font = Enum.Font.GothamSemibold
-    button.TextColor3 = Color3.fromRGB(220,220,230)
-    button.TextSize = 16
+    button.TextSize = 14
     button.BorderSizePixel = 0
+
+    -- Give the OP tab a special crimson color
+    if tabName == "⚡ OP" then
+        button.BackgroundColor3 = Color3.fromRGB(80, 20, 20)
+        button.TextColor3 = Color3.fromRGB(255, 120, 120)
+    else
+        button.BackgroundColor3 = tabName=="Combat" and Color3.fromRGB(60,100,160) or Color3.fromRGB(60,60,60)
+        button.TextColor3 = Color3.fromRGB(220,220,230)
+    end
 
     local btnCorner = Instance.new("UICorner", button)
     btnCorner.CornerRadius = UDim.new(0, 18)
 
     button.MouseButton1Click:Connect(function()
         for _, b in pairs(tabButtons) do
-            b.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+            -- Restore OP tab to its special idle color
+            if b.Name == "⚡ OPTab" then
+                b.BackgroundColor3 = Color3.fromRGB(80, 20, 20)
+                b.TextColor3 = Color3.fromRGB(255, 120, 120)
+            else
+                b.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+                b.TextColor3 = Color3.fromRGB(220, 220, 230)
+            end
         end
-        button.BackgroundColor3 = Color3.fromRGB(60,100,160)
+        if tabName == "⚡ OP" then
+            button.BackgroundColor3 = Color3.fromRGB(180, 30, 30)
+            button.TextColor3 = Color3.fromRGB(255, 220, 220)
+        else
+            button.BackgroundColor3 = Color3.fromRGB(60,100,160)
+            button.TextColor3 = Color3.fromRGB(220,220,230)
+        end
         selectedTab = tabName
         for t, container in pairs(tabContainers) do
             container.Visible = (t == tabName)
@@ -448,7 +473,6 @@ local function createToggle(name, yPos, parent)
         toggle.Text = name .. (enabled and ": ON" or ": OFF")
         toggle.BackgroundColor3 = enabled and Color3.fromRGB(50, 150, 50) or Color3.fromRGB(150, 50, 50)
     end)
-    -- Return getter AND a setter so we can restore state from saved settings
     local function setter(val)
         enabled = val
         toggle.Text = name .. (enabled and ": ON" or ": OFF")
@@ -532,13 +556,10 @@ local function createDropdown(name, options, yPos, parent)
 
     dropdown.MouseButton1Click:Connect(function()
         open = not open
-
         for _, v in ipairs(openDropdowns) do
             v.Visible = false
         end
-
         scrollFrame.Visible = open
-
         if open then
             dropdown.ZIndex = 99
             scrollFrame.ZIndex = 100
@@ -551,7 +572,6 @@ local function createDropdown(name, options, yPos, parent)
     end)
 
     local function setter(val)
-        -- Only set if val is in options
         for _, opt in ipairs(options) do
             if opt == val then
                 selected = val
@@ -702,6 +722,7 @@ end)
 
 local raidTab = tabContainers["Raids"]
 local dungeonTab = tabContainers["Dungeon"]
+local opTab = tabContainers["⚡ OP"]
 local settingsTab = tabContainers["Settings"]
 
 local raidEnabled, _, setRaidEnabled = createToggle("Auto Raid", 10, raidTab)
@@ -714,6 +735,126 @@ local raidSelection, setRaidSelection = createDropdown("Select Raid", {
 }, 52, raidTab)
 local dungeonEnabled, _, setDungeonEnabled = createToggle("Auto Dungeon", 10, dungeonTab)
 
+--==========================================================--
+--// ⚡ OP TAB — AUTO INSTANT PRESTIGE
+-- Fires prestigeRemote as fast as possible, completely
+-- independent of evolution state. No EP check, no evolve
+-- delay. Pure spam prestige on its own thread.
+--==========================================================--
+
+-- Prestige counter display
+local opPrestigeCountLabel = Instance.new("TextLabel")
+opPrestigeCountLabel.Parent = opTab
+opPrestigeCountLabel.Size = UDim2.new(0, 460, 0, 28)
+opPrestigeCountLabel.Position = UDim2.new(0, 10, 0, 10)
+opPrestigeCountLabel.BackgroundTransparency = 1
+opPrestigeCountLabel.Text = "⚡ Instant Prestiges This Session: 0"
+opPrestigeCountLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
+opPrestigeCountLabel.Font = Enum.Font.GothamBold
+opPrestigeCountLabel.TextSize = 16
+opPrestigeCountLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+-- Main toggle
+local instantPrestigeEnabled, _, setInstantPrestigeEnabled = createToggle("Auto Instant Prestige", 46, opTab)
+
+-- Speed dropdown: how fast to fire per cycle
+local prestigeSpeedOptions = {"Max Speed (no delay)", "Fast (0.05s)", "Normal (0.1s)", "Safe (0.5s)"}
+local prestigeSpeedDropdown, setPrestigeSpeedDropdown = createDropdown("Prestige Speed", prestigeSpeedOptions, 88, opTab)
+
+-- Warning label
+local opWarningLabel = Instance.new("TextLabel")
+opWarningLabel.Parent = opTab
+opWarningLabel.Size = UDim2.new(0, 460, 0, 54)
+opWarningLabel.Position = UDim2.new(0, 10, 0, 172)
+opWarningLabel.BackgroundTransparency = 1
+opWarningLabel.Text = "⚠  Max Speed fires with no delay.\nThis bypasses evolution entirely — prestige\nfires on its own loop, instantly and always."
+opWarningLabel.TextColor3 = Color3.fromRGB(255, 200, 60)
+opWarningLabel.Font = Enum.Font.SourceSans
+opWarningLabel.TextSize = 14
+opWarningLabel.TextXAlignment = Enum.TextXAlignment.Left
+opWarningLabel.TextWrapped = true
+
+-- Status glow label
+local opStatusLabel = Instance.new("TextLabel")
+opStatusLabel.Parent = opTab
+opStatusLabel.Size = UDim2.new(0, 460, 0, 28)
+opStatusLabel.Position = UDim2.new(0, 10, 0, 230)
+opStatusLabel.BackgroundTransparency = 1
+opStatusLabel.Text = "Status: IDLE"
+opStatusLabel.TextColor3 = Color3.fromRGB(180, 180, 180)
+opStatusLabel.Font = Enum.Font.GothamSemibold
+opStatusLabel.TextSize = 15
+opStatusLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+-- Prestige counter tracker
+local instantPrestigeCount = 0
+
+-- Instant Prestige loop — fully independent thread, no EP or evolve dependency
+task.spawn(function()
+    while true do
+        if instantPrestigeEnabled() then
+            -- Determine delay from speed setting
+            local speedSetting = prestigeSpeedDropdown()
+            local delay = 0
+            if speedSetting == "Fast (0.05s)" then
+                delay = 0.05
+            elseif speedSetting == "Normal (0.1s)" then
+                delay = 0.1
+            elseif speedSetting == "Safe (0.5s)" then
+                delay = 0.5
+            else
+                delay = 0  -- Max Speed
+            end
+
+            local success, result = pcall(function()
+                return prestigeRemote:InvokeServer()
+            end)
+
+            if success then
+                instantPrestigeCount += 1
+                opPrestigeCountLabel.Text = "⚡ Instant Prestiges This Session: " .. tostring(instantPrestigeCount)
+                opStatusLabel.Text = "Status: ⚡ FIRING — " .. tostring(instantPrestigeCount) .. " prestiges done"
+                opStatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80)
+            else
+                opStatusLabel.Text = "Status: ⚠ Remote error, retrying..."
+                opStatusLabel.TextColor3 = Color3.fromRGB(255, 200, 60)
+            end
+
+            if delay > 0 then
+                task.wait(delay)
+            else
+                task.wait()  -- yield one frame only at max speed
+            end
+        else
+            opStatusLabel.Text = "Status: IDLE"
+            opStatusLabel.TextColor3 = Color3.fromRGB(180, 180, 180)
+            task.wait(0.1)
+        end
+    end
+end)
+
+-- Pulsing glow effect on the OP status label when active
+task.spawn(function()
+    local t = 0
+    while true do
+        t += 0.05
+        if instantPrestigeEnabled() then
+            local pulse = 0.5 + 0.5 * math.sin(t * 6)
+            opStatusLabel.TextColor3 = Color3.fromRGB(
+                255,
+                math.floor(60 + 60 * pulse),
+                math.floor(60 + 60 * pulse)
+            )
+            opPrestigeCountLabel.TextColor3 = Color3.fromRGB(
+                255,
+                math.floor(80 + 80 * pulse),
+                math.floor(80 + 80 * pulse)
+            )
+        end
+        task.wait(0.03)
+    end
+end)
+
 -- Syncs toggle states into _state at 100 Hz — keeps OnClientInvoke always current
 task.spawn(function()
     local lastType, lastSkill
@@ -722,7 +863,6 @@ task.spawn(function()
         _state.skip   = skipEnabled()
         _state.type   = combatTypeDropdown()
         _state.skill  = tonumber(skillSelect()) or 1
-        -- Reset prefer-skill state when settings change
         if lastType ~= _state.type or lastSkill ~= _state.skill then
             _psState.step = 1
             _psState.cycleIndex = 1
@@ -747,7 +887,6 @@ local autoClaimEnabled, autoClaimToggle, setAutoClaimEnabled = createToggle("Aut
 --==========================================================--
 local autoRejoinEnabled, autoRejoinToggle, setAutoRejoinEnabled = createToggle("Auto Rejoin", 178, settingsTab)
 
--- Private server link input
 local privateLinkLabel = Instance.new("TextLabel")
 privateLinkLabel.Parent = settingsTab
 privateLinkLabel.Size = UDim2.new(0, 260, 0, 20)
@@ -776,58 +915,41 @@ privateLinkBox.ClearTextOnFocus = false
 local privateLinkCorner = Instance.new("UICorner", privateLinkBox)
 privateLinkCorner.CornerRadius = UDim.new(0, 10)
 
--- Helper: extract private server code from a link like
--- https://www.roblox.com/games/GAMEID/NAME?privateServerLinkCode=XXXXX
 local function extractPrivateCode(link)
     if not link or link == "" then return nil end
     local code = link:match("[?&]privateServerLinkCode=([^&%s]+)")
     return code
 end
 
--- Watch for disconnect/kick and auto-rejoin
 local gameId = game.PlaceId
 
 task.spawn(function()
-    -- Connect to the teleport failed / kicked event
     local Players = game:GetService("Players")
     local TeleportService = game:GetService("TeleportService")
 
     Players.LocalPlayer.OnTeleport:Connect(function(state)
-        -- If we're being kicked (TeleportState.Failed or RequestedByServer without us asking)
-        -- we don't act here; we handle via a disconnect watcher below
     end)
 
-    -- Main rejoin watcher: fires when the local player is about to leave
-    -- (character removal + game closing = disconnect in most executors)
     game:BindToClose(function()
         if not autoRejoinEnabled() then return end
-
-        task.wait(1) -- brief wait before rejoin
-
+        task.wait(1)
         local privateCode = extractPrivateCode(privateLinkBox.Text)
-
         if privateCode then
-            -- Rejoin private server
             pcall(function()
                 TeleportService:TeleportToPrivateServer(gameId, privateCode, {Players.LocalPlayer})
             end)
         else
-            -- Rejoin any public server
             pcall(function()
                 TeleportService:Teleport(gameId, Players.LocalPlayer)
             end)
         end
     end)
 
-    -- Secondary: watch for the player being removed from the game (kick/crash)
     Players.PlayerRemoving:Connect(function(removedPlayer)
         if removedPlayer ~= Players.LocalPlayer then return end
         if not autoRejoinEnabled() then return end
-
         task.wait(1)
-
         local privateCode = extractPrivateCode(privateLinkBox.Text)
-
         if privateCode then
             pcall(function()
                 TeleportService:TeleportToPrivateServer(gameId, privateCode, {Players.LocalPlayer})
@@ -843,10 +965,6 @@ end)
 --==========================================================--
 --// AUTO SAVE SETTINGS
 --==========================================================--
--- Settings are saved to "TensuraPanel_Settings.json" via writefile/readfile.
--- Supported by most executors (Synapse, KRNL, Fluxus, etc.)
--- If the executor doesn't support file I/O, saving is silently skipped.
-
 local SETTINGS_FILE = "TensuraPanel_Settings.json"
 
 local function canUseFileIO()
@@ -855,25 +973,23 @@ end
 
 local function gatherSettings()
     return {
-        -- Combat
         combatEnabled        = combatEnabled(),
         skipEnabled          = skipEnabled(),
         combatType           = combatTypeDropdown(),
         selectedSkill        = skillSelect(),
-        -- Player
         prestigeEnabled      = prestigeEnabled(),
         evolveEnabled        = evolveEnabled(),
         autoRaceEnabled      = autoRaceEnabled(),
         raceTarget           = raceDropdown(),
-        -- Spirits
         autoSpiritRoll       = autoSpiritRollEnabled(),
         spiritTarget         = spiritTargetDropdown(),
         spiritSlot           = spiritSlotDropdown(),
-        -- Raids
         raidEnabled          = raidEnabled(),
         raidSelection        = raidSelection(),
-        -- Dungeon
         dungeonEnabled       = dungeonEnabled(),
+        -- OP tab
+        instantPrestige      = instantPrestigeEnabled(),
+        prestigeSpeed        = prestigeSpeedDropdown(),
         -- Settings
         colorPreset          = colorDropdown(),
         antiAFK              = antiAFKEnabled(),
@@ -885,25 +1001,23 @@ local function gatherSettings()
 end
 
 local function applySettings(s)
-    -- Combat
     if s.combatEnabled   ~= nil then setCombatEnabled(s.combatEnabled) end
     if s.skipEnabled     ~= nil then setSkipEnabled(s.skipEnabled) end
     if s.combatType      ~= nil then setCombatTypeDropdown(s.combatType) end
     if s.selectedSkill   ~= nil then setSkillSelect(s.selectedSkill) end
-    -- Player
     if s.prestigeEnabled ~= nil then setPrestigeEnabled(s.prestigeEnabled) end
     if s.evolveEnabled   ~= nil then setEvolveEnabled(s.evolveEnabled) end
     if s.autoRaceEnabled ~= nil then setAutoRaceEnabled(s.autoRaceEnabled) end
     if s.raceTarget      ~= nil then setRaceDropdown(s.raceTarget) end
-    -- Spirits
     if s.autoSpiritRoll  ~= nil then setAutoSpiritRollEnabled(s.autoSpiritRoll) end
     if s.spiritTarget    ~= nil then setSpiritTargetDropdown(s.spiritTarget) end
     if s.spiritSlot      ~= nil then setSpiritSlotDropdown(s.spiritSlot) end
-    -- Raids
     if s.raidEnabled     ~= nil then setRaidEnabled(s.raidEnabled) end
     if s.raidSelection   ~= nil then setRaidSelection(s.raidSelection) end
-    -- Dungeon
     if s.dungeonEnabled  ~= nil then setDungeonEnabled(s.dungeonEnabled) end
+    -- OP tab
+    if s.instantPrestige ~= nil then setInstantPrestigeEnabled(s.instantPrestige) end
+    if s.prestigeSpeed   ~= nil then setPrestigeSpeedDropdown(s.prestigeSpeed) end
     -- Settings tab
     if s.colorPreset     ~= nil then setColorDropdown(s.colorPreset) ; setGUIGradientPreset(s.colorPreset) end
     if s.antiAFK         ~= nil then setAntiAFKEnabled(s.antiAFK) end
@@ -938,7 +1052,6 @@ local function loadSettings()
     end
 end
 
--- Auto Save Settings toggle + manual Save/Load buttons
 local autoSaveEnabled, autoSaveToggle, setAutoSaveEnabled = createToggle("Auto Save Settings", 276, settingsTab)
 
 local saveButton = Instance.new("TextButton")
@@ -983,7 +1096,6 @@ loadButton.MouseButton1Click:Connect(function()
     end)
 end)
 
--- Auto-save loop (every 10 seconds when enabled)
 task.spawn(function()
     while true do
         task.wait(10)
@@ -993,16 +1105,12 @@ task.spawn(function()
     end
 end)
 
--- Load settings on startup
 task.spawn(function()
-    task.wait(0.5) -- wait for all controls to be ready
+    task.wait(0.5)
     loadSettings()
 end)
 
 --==========================================================--
--- Everything below is unchanged from original
---==========================================================--
-
 task.spawn(function()
     local lastPreset = selectedGradientPreset
     while true do
@@ -1135,6 +1243,7 @@ task.spawn(function()
     end
 end)
 
+-- Original auto prestige (Player tab) — still works as before
 task.spawn(function()
     while true do
         if prestigeEnabled() then
@@ -1145,6 +1254,7 @@ task.spawn(function()
         task.wait()
     end
 end)
+
 task.spawn(function()
     while true do
         if evolveEnabled() then
@@ -1161,6 +1271,7 @@ task.spawn(function()
         task.wait()
     end
 end)
+
 task.spawn(function()
     while true do
         if raidEnabled() then
@@ -1171,6 +1282,7 @@ task.spawn(function()
         task.wait(2)
     end
 end)
+
 task.spawn(function()
     while true do
         if dungeonEnabled() then
@@ -1199,7 +1311,7 @@ task.spawn(function()
     borderStroke.Transparency = 0.5
 end)
 
--- Animation loop for gradients!
+-- Animation loop for gradients
 task.spawn(function()
     local t = 0
     while true do
